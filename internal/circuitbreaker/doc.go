@@ -10,4 +10,13 @@
 //
 // Configuration (threshold and cooldown) can be set via [Config]; sensible
 // defaults are provided by [DefaultConfig].
+//
+// # State Transitions
+//
+// The following diagram summarises how the circuit moves between states:
+//
+//	Closed ──(consecutive failures ≥ threshold)──► Open
+//	Open   ──(cooldown elapsed)──────────────────► Half-Open
+//	Half-Open ──(probe success)──────────────────► Closed
+//	Half-Open ──(probe failure)──────────────────► Open
 package circuitbreaker
