@@ -6,51 +6,56 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/grpcpulse/internal/acknowledger"
 )
 
-func newAcknowledger() *acknowledgerHandler {
-	return &acknowledgerHandler{ack: acknowledger.New()}
+func newAcknowledger() *acknowledger.Acknowledger {
+	return acknowledger.New()
 }
 
 func TestAcknowledgerHandler_ListEmpty(t *testing.T) {
-	h := newAcknowledger()
+	h := acknowledgerHandler(newAcknowledger())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/acks", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	var out []interface{}
-	json.NewDecoder(rec.Body).Decode(&out)
-	if len(out) != 0 {
-		t.Errorf("expected empty list, got %d items", len(out))
+	var acks []acknowledger.Acknowledgement
+	if err := json.NewDecoder(rec.Body).Decode(&acks); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(acks) != 0 {
+		t.Fatalf("expected empty list, got %d", len(acks))
 	}
 }
 
 func TestAcknowledgerHandler_AddAndList(t *testing.T) {
-	h := newAcknowledger()
-	body := `{"target":"svc:50051","reason":"known","acked_by":"alice","ttl":"1h"}`
+	store := newAcknowledger()
+	h := acknowledgerHandler(store)
+
+	body, _ := json.Marshal(map[string]string{"target": "svc-a", "duration": "5m"})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/acks", bytes.NewBufferString(body)))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/acks", bytes.NewReader(body)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", rec.Code)
 	}
 
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/acks", nil))
-	var out []map[string]interface{}
-	json.NewDecoder(rec2.Body).Decode(&out)
-	if len(out) != 1 {
-		t.Fatalf("expected 1 ack, got %d", len(out))
+	var acks []acknowledger.Acknowledgement
+	json.NewDecoder(rec2.Body).Decode(&acks)
+	if len(acks) != 1 {
+		t.Fatalf("expected 1 ack, got %d", len(acks))
 	}
-	if out[0]["target"] != "svc:50051" {
-		t.Errorf("unexpected target %v", out[0]["target"])
+	if acks[0].Target != "svc-a" {
+		t.Errorf("unexpected target %q", acks[0].Target)
 	}
 }
 
 func TestAcknowledgerHandler_InvalidMethod(t *testing.T) {
-	h := newAcknowledger()
+	h := acknowledgerHandler(newAcknowledger())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/acks", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -59,24 +64,26 @@ func TestAcknowledgerHandler_InvalidMethod(t *testing.T) {
 }
 
 func TestAcknowledgerHandler_DeleteAck(t *testing.T) {
-	h := newAcknowledger()
-	body := `{"target":"svc:50051","reason":"r","acked_by":"bob","ttl":"1h"}`
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/acks", bytes.NewBufferString(body)))
+	store := newAcknowledger()
+	_ = store.Acknowledge("svc-b", 10*time.Minute)
 
+	h := acknowledgerHandler(store)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/acks?target=svc:50051", nil))
+	req := httptest.NewRequest(http.MethodDelete, "/acks?target=svc-b", nil)
+	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", rec.Code)
 	}
-	if h.ack.IsAcknowledged("svc:50051") {
-		t.Error("expected ack to be removed")
+	if store.IsAcknowledged("svc-b") {
+		t.Error("expected svc-b to be cleared")
 	}
 }
 
-func TestAcknowledgerHandler_MissingTargetOnDelete(t *testing.T) {
-	h := newAcknowledger()
+func TestAcknowledgerHandler_InvalidDuration(t *testing.T) {
+	h := acknowledgerHandler(newAcknowledger())
+	body, _ := json.Marshal(map[string]string{"target": "svc-c", "duration": "bad"})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/acks", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/acks", bytes.NewReader(body)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
