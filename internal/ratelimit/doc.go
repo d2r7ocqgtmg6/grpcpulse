@@ -1,15 +1,13 @@
-// Package ratelimit implements a per-target token-bucket rate limiter used by
-// the grpcpulse scheduler to prevent hammering unhealthy or slow gRPC endpoints.
+// Package ratelimit provides per-target rate limiting for health checks.
+//
+// It ensures that a given target is not checked more frequently than a
+// configured minimum interval, preventing thundering-herd scenarios and
+// reducing load on downstream services.
 //
 // Usage:
 //
-//	limiter := ratelimit.New(ratelimit.DefaultConfig())
-//
-//	if limiter.Allow(target) {
-//		// perform health check
+//	rl := ratelimit.New(ratelimit.DefaultConfig())
+//	if rl.Allow("my-service:443") {
+//	    // perform check
 //	}
-//
-// The MinDelay field in Config controls the minimum interval between successive
-// checks for the same target address. Calls to Allow that arrive before the
-// delay has elapsed return false without modifying state.
 package ratelimit
